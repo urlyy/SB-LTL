@@ -23,7 +23,67 @@ bool is_output(const string &e){
     return e[0]=='o';
 }
 
+
+twa_graph_ptr formula2aut(const string& formula){
+    spot::parsed_formula pf = spot::parse_infix_psl(formula);
+    std::ostringstream error;
+    if (pf.format_errors(error)) {
+        throw std::runtime_error("Failed to parse formula " + formula + '\n' + error.str());
+    }
+    twa_graph_ptr automata;
+    spot::translator translator;
+    // 注意这里没有用Deterministic
+    translator.set_pref(spot::postprocessor::Complete | spot::postprocessor::SBAcc | spot::postprocessor::Deterministic);
+    automata = translator.run(pf.f);
+    return automata;
+}
+
+void init(twa_graph_ptr &aut, const vector<string>& inputs){
+    const std::set<string> aps(inputs.begin(), inputs.end());
+    vector<spot::formula> ap_formulas;
+     /*
+     * 把每个ap变成公式
+     * 照着ltlfuzzer写的，我也不知道在干嘛
+     * 好像还会造成问题?
+     */
+    for(const string& ap:aps){
+        ap_formulas.push_back(spot::parse_infix_psl(ap).f);
+    }
+    if (!ap_formulas.empty()) {
+        spot::exclusive_ap excl;
+        excl.add_group(ap_formulas);
+        aut = excl.constrain(aut, true);
+    }
+    /**
+     * 把公式里的ap提取出来并从0开始编号
+     * Construct BDD variable map
+     */
+    bdd_map_.clear();
+    int nex_id = 0;
+    // reverse_bdd_map_.clear();
+    cout<<"==================== ap in LTL"<<'\n';
+    for (const auto &kv : aut->get_dict()->var_map) {
+        bdd_map_[kv.first.ap_name()] = kv.second;
+        cout<<kv.first.ap_name()<<": "<<kv.second<<"\n";
+        nex_id = kv.second + 1;
+        // reverse_bdd_map_[kv.second] = kv.first.ap_name();
+    }
+    cout<<"==================== ap in LTL"<<'\n';
+    /**
+     * 为了使用到公式外的ap，我再额外添加一次
+     * 但这样也有如果输入太分散导致大bdd_map太大的问题
+     * NEW: 只加输出对应的ap
+     */
+    for(const string& ap:aps){
+        if(bdd_map_.find(ap) == bdd_map_.end() && is_output(ap)){
+            bdd_map_[ap] = nex_id;
+            nex_id ++;
+        }
+    }
+}
+
 void print_aut(twa_graph_ptr aut){
+    cout<<"============================= Automata"<<'\n';
     unsigned init = aut->get_init_state_number();
     std::cout << "Initial state:";
     if (aut->is_univ_dest(init))
@@ -73,7 +133,7 @@ void print_aut(twa_graph_ptr aut){
     //         std::cout << "\n    acc sets = " << t.acc << '\n';
     //     }
     // }
-    cout << "接收结点ID: { ";
+    cout << "accept state ID: { ";
     const spot::acc_cond& acc = aut->acc();
     unsigned ns = aut->num_states();
     for (unsigned s = 0; s < ns; ++s){
@@ -82,63 +142,10 @@ void print_aut(twa_graph_ptr aut){
         }
     }
     std::cout << " }\n";
+    cout<<"============================= Automata"<<'\n';
 }
 
-void init(twa_graph_ptr &aut, const vector<string>& inputs){
-    const std::set<string> aps(inputs.begin(), inputs.end());
-    vector<spot::formula> ap_formulas;
-     /*
-     * 把每个ap变成公式
-     * 照着ltlfuzzer写的，我也不知道在干嘛
-     * 好像还会造成问题?
-     */
-    for(const string& ap:aps){
-        ap_formulas.push_back(spot::parse_infix_psl(ap).f);
-    }
-    if (!ap_formulas.empty()) {
-        spot::exclusive_ap excl;
-        excl.add_group(ap_formulas);
-        aut = excl.constrain(aut, true);
-    }
-    /**
-     * 把公式里的ap提取出来并从0开始编号
-     * Construct BDD variable map
-     */
-    bdd_map_.clear();
-    int nex_id = 0;
-    // reverse_bdd_map_.clear();
-    for (const auto &kv : aut->get_dict()->var_map) {
-        bdd_map_[kv.first.ap_name()] = kv.second;
-        cout<<kv.first.ap_name()<<": "<<kv.second<<"\n";
-        nex_id = kv.second + 1;
-        // reverse_bdd_map_[kv.second] = kv.first.ap_name();
-    }
-    /**
-     * 为了使用到公式外的ap，我再额外添加一次
-     * 但这样也有如果输入太分散导致大bdd_map太大的问题
-     * NEW: 只加输出对应的ap
-     */
-    for(const string& ap:aps){
-        if(bdd_map_.find(ap) == bdd_map_.end() && is_output(ap)){
-            bdd_map_[ap] = nex_id;
-            nex_id ++;
-        }
-    }
-}
 
-twa_graph_ptr formula2aut(const string& formula){
-    spot::parsed_formula pf = spot::parse_infix_psl(formula);
-    std::ostringstream error;
-    if (pf.format_errors(error)) {
-        throw std::runtime_error("Failed to parse formula " + formula + '\n' + error.str());
-    }
-    twa_graph_ptr automata;
-    spot::translator translator;
-    // 注意这里没有用Deterministic
-    translator.set_pref(spot::postprocessor::Complete | spot::postprocessor::SBAcc | spot::postprocessor::Deterministic);
-    automata = translator.run(pf.f);
-    return automata;
-}
 
 bool cond_check_res;
 static void true_cond_checker(char *cond, int size)
@@ -182,8 +189,6 @@ static void cond_checker(char *cond, int size)
     cond_check_res = n_match == n_true;
 }
 
-
-
 bool check_accept(const twa_graph_ptr &aut,const vector<string>& events){
     unsigned cur_state_id = aut->get_init_state_number();
     for(const string& e:events){
@@ -192,12 +197,11 @@ bool check_accept(const twa_graph_ptr &aut,const vector<string>& events){
             continue;
         }
         event_idx = bdd_map_[e];
-        cout<<"event: "<<e<<" ,cur_state_id: "<<cur_state_id<<"\n";
+        cout<<"cur_state_id: "<<cur_state_id<<" , cur_event: "<<e<<"\n";
         bool sat = false;
         // 遍历当前状态所有的出边
         for (auto& edge: aut->out(cur_state_id)){
-            cout<<edge.src << " " << edge.dst<<" " << spot::bdd_format_formula(aut->get_dict(), edge.cond)<<"\n";
-            // std::cout << "\n    acc sets = " << e.acc << '\n';
+            // cout<<edge.src << " " << edge.dst<<" " << spot::bdd_format_formula(aut->get_dict(), edge.cond)<<"\n";
             // bdd_allsat的文档参考：https://buddy.sourceforge.net/manual/group__operator_gf41487d86f76d3480d379ff434a2c476.html#gf41487d86f76d3480d379ff434a2c476
             bdd_allsat(edge.cond,true_cond_checker);
             // 转移条件是true
@@ -236,9 +240,10 @@ int main()
     string formula = "!i1 || (i1 & X(o2))";
     string formula1 = "i1 & F(o2)";
     string formula2 = "i1 & X(o2)";
+    string formula3 = "F(i1 & X(o2))";
     // 程序的输入输出的trace序列
-    vector<string> inputs = {"i2","o2","o2"};
-    twa_graph_ptr aut = formula2aut(formula);
+    vector<string> inputs = {"i3","o4","i1","o2"};
+    twa_graph_ptr aut = formula2aut(formula3);
     init(aut,inputs);
     print_aut(aut);
     bool res = check_accept(aut,inputs);

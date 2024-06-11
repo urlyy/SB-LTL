@@ -47,6 +47,49 @@ chmod +x run.sh
 ./run.sh
 ```
 
+例子：
+
+```
+LTL: F(i1 & X(o2))
+
+events : [ "i3","o4","i1","o2" ]
+
+output:
+==================== ap in LTL
+i1: 0
+o2: 4
+==================== ap in LTL
+============================= Automata
+Initial state: 0
+State 0:
+  edge(0 -> 0)
+    label = !i1
+    acc sets = {}
+  edge(0 -> 1)
+    label = i1
+    acc sets = {}
+State 1:
+  edge(1 -> 2)
+    label = o2
+    acc sets = {}
+  edge(1 -> 0)
+    label = !i1 & !o2
+    acc sets = {}
+  edge(1 -> 1)
+    label = i1
+    acc sets = {}
+State 2:
+  edge(2 -> 2)
+    label = 1
+    acc sets = {0}
+accept state ID: { 2, }
+============================= Automata
+cur_state_id: 0 , cur_event: o4
+cur_state_id: 0 , cur_event: i1
+cur_state_id: 1 , cur_event: o2
+accept: true
+```
+
 ## TODO
 
 - 解决 prefix 接收即判断接收的方法
