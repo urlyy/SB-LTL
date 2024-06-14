@@ -95,3 +95,4 @@ accept: true
 - 解决 prefix 接收即判断接收的方法
 - 完善 Dockerfile
 - 在另外一个项目中基于本项目，结合 插桩+fuzz 进行真正的运行时验证(即类似ltlfuzzer项目一样的效果，但脱离afl专注LTL)
+- 根据 (G((a -> F(b))) & G((a -> X(b)))) 编写一次输入 后跟一个输出系列时 的验证例子  把event_idx改成set
