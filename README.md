@@ -2,7 +2,7 @@
 
 <a href="README.md">中文</a> | <a href="README.en.md">English</a>
 
-## introduction
+## Introduction
 
 - 一个基于 [Spot](https://spot.lre.epita.fr/index.html) 的运行时验证 LTL 性质的小工具
 - 主要是检测输入输出的 events 对应的 trace 是否能被 buchi 接收
@@ -12,7 +12,7 @@
 - 该程序认为 `printf(xx)` 是命题，而一个自动机的状态是多个命题的布尔组合，如 `state_1=i1,state_2=[o2,o3,o4]`。这个需要测试人员手动在待测代码中在程序输入的位置插桩代码`printf("ixx")`，在关键的代码下一行插桩`printf("oxx")`。而插桩代码需要在一次输入后收集`i event`，并收集两次输入之间的所有`o event`
 - 本项目是一个学习 LTL 的项目，所以可能有疏漏的地方，欢迎指正
 
-## install
+## Install
 
 - 只有 spot 和 g++两个依赖
 - spot 的安装不能参考教程，如下
@@ -32,7 +32,7 @@
 
 3. 具体的参考 Dockerfile
 
-## run
+## Run
 
 ```
 chmod +x build.sh
@@ -123,4 +123,4 @@ docker run --rm -v /home/urlyy/桌面/ltl-fuzzer/SB-LTL:/app -it sb-ltl:urlyy
 ## TODO
 
 - 解决 prefix 接收即判断接收的方法
-- 在另外一个项目中基于本项目，结合 插桩+fuzz 进行真正的运行时验证(即类似 ltlfuzzer 项目一样的效果，但脱离 afl 专注 LTL)（难度较大，不考虑这个了）
+- 在另外一个项目中基于本项目，结合 插桩+fuzz 进行真正的运行时验证(即类似 [ltlfuzzer](https://github.com/ltlfuzzer/LTL-Fuzzer) 项目一样的效果，但脱离 afl 专注 LTL)（难度较大，不考虑这个了）
