@@ -16,15 +16,20 @@ using std::vector;
 using std::string;
 using std::cout;
 using spot::twa_graph_ptr;
+using std::unordered_map;
+using std::unordered_set;
 
-std::unordered_map<string, int> bdd_map_;
+unordered_map <string, int> bdd_map;
+unordered_map<int, string> bdd_map_rev;
+
 
 bool is_output(const string &e){
     return e[0]=='o';
 }
 
-
 twa_graph_ptr formula2aut(const string& formula){
+    cout<<"==================== formula to automata"<<'\n';
+    cout<<"LTL is "<<formula<<std::endl;
     spot::parsed_formula pf = spot::parse_infix_psl(formula);
     std::ostringstream error;
     if (pf.format_errors(error)) {
@@ -32,84 +37,55 @@ twa_graph_ptr formula2aut(const string& formula){
     }
     twa_graph_ptr automata;
     spot::translator translator;
-    // 注意这里没有用Deterministic
-    translator.set_pref(spot::postprocessor::Complete | spot::postprocessor::SBAcc | spot::postprocessor::Deterministic);
-    automata = translator.run(pf.f);
-    return automata;
+    // 不能用sbacc
+    translator.set_type(spot::postprocessor::Buchi);
+    translator.set_pref(spot::postprocessor::Complete | spot::postprocessor::Deterministic);
+    return translator.run(pf.f);
 }
 
-void init(twa_graph_ptr &aut, const vector<string>& inputs){
-    const std::set<string> aps(inputs.begin(), inputs.end());
+void init(twa_graph_ptr &aut){
+    
     vector<spot::formula> ap_formulas;
-     /*
-     * 把每个ap变成公式
-     * 照着ltlfuzzer写的，我也不知道在干嘛
-     * 好像还会造成问题?
-     */
-    for(const string& ap:aps){
-        ap_formulas.push_back(spot::parse_infix_psl(ap).f);
-    }
-    if (!ap_formulas.empty()) {
-        spot::exclusive_ap excl;
-        excl.add_group(ap_formulas);
-        aut = excl.constrain(aut, true);
-    }
     /**
      * 把公式里的ap提取出来并从0开始编号
      * Construct BDD variable map
      */
-    bdd_map_.clear();
-    int nex_id = 0;
-    // reverse_bdd_map_.clear();
     cout<<"==================== ap in LTL"<<'\n';
     for (const auto &kv : aut->get_dict()->var_map) {
-        bdd_map_[kv.first.ap_name()] = kv.second;
+        bdd_map[kv.first.ap_name()] = kv.second;
+        bdd_map_rev[kv.second] = kv.first.ap_name();
         cout<<kv.first.ap_name()<<": "<<kv.second<<"\n";
-        nex_id = kv.second + 1;
-        // reverse_bdd_map_[kv.second] = kv.first.ap_name();
-    }
-    cout<<"==================== ap in LTL"<<'\n';
-    /**
-     * 为了使用到公式外的ap，我再额外添加一次
-     * 但这样也有如果输入太分散导致大bdd_map太大的问题
-     * NEW: 只加输出对应的ap
-     */
-    for(const string& ap:aps){
-        if(bdd_map_.find(ap) == bdd_map_.end() && is_output(ap)){
-            bdd_map_[ap] = nex_id;
-            nex_id ++;
-        }
     }
 }
 
 void print_aut(twa_graph_ptr aut){
     cout<<"============================= Automata"<<'\n';
     unsigned init = aut->get_init_state_number();
-    std::cout << "Initial state:";
+    cout << "Initial state:";
     if (aut->is_univ_dest(init))
-    std::cout << " {";
+    cout << " {";
     for (unsigned i: aut->univ_dests(init))
-    std::cout << ' ' << i;
+    cout << ' ' << i;
     if (aut->is_univ_dest(init))
-    std::cout << " }";
-    std::cout << '\n';
+    cout << " }";
+    cout << '\n';
     const spot::bdd_dict_ptr& dict = aut->get_dict();
     unsigned n = aut->num_states();
     for (unsigned s = 0; s < n; ++s)
     {
-        std::cout << "State " << s << ":\n";
+        cout << "State " << s << ":\n";
         for (auto& t: aut->out(s))
         {
-            std::cout << "  edge(" << t.src << " ->";
+            cout << "  edge(" << t.src << " ->";
             if (aut->is_univ_dest(t))
-            std::cout << " {";
+            cout << " {";
             for (unsigned dst: aut->univ_dests(t))
-            std::cout << ' ' << dst;
+            cout << ' ' << dst;
             if (aut->is_univ_dest(t))
-            std::cout << " }";
-            std::cout << ")\n    label = ";
-            spot::bdd_print_formula(std::cout, dict, t.cond);
-            std::cout << "\n    acc sets = " << t.acc << '\n';
+            cout << " }";
+            cout << ")\n    label = ";
+            cout << spot::bdd_format_formula(dict, t.cond);
+            cout << "\n    acc sets = " << t.acc << '\n';
         }
     }
     // 下面这个可要可不要
@@ -142,15 +118,13 @@ void print_aut(twa_graph_ptr aut){
         }
     }
     std::cout << " }\n";
-    cout<<"============================= Automata"<<'\n';
 }
 
-
-
 bool cond_check_res;
+// 判断这个trans的条件是否为1(TRUE)
 static void true_cond_checker(char *cond, int size)
 {
-    // 全部都不满足即true
+    // 没有相关的命题，即为一个true
     for (int i = 0; i < size; i++) {
         if (cond[i] >= 0) {
             cond_check_res = false;
@@ -160,9 +134,8 @@ static void true_cond_checker(char *cond, int size)
     cond_check_res = true;
 }
 
-
-// 其实cond的每个下标，就是bdd_map里，和LTL有关的ap的每个编号
-int event_idx;
+unordered_set<int> cur_events_idx;
+// 判断这个trans的条件是否是本次事件的子集
 static void cond_checker(char *cond, int size)
 {
     int n_true = 0;
@@ -172,42 +145,68 @@ static void cond_checker(char *cond, int size)
         }
     }
     int n_match = 0;
-    // ap未在LTL中时，-1表示不关心,这里我们无需处理
-    if(event_idx < size){
-        // 命题为假,直接跳出
-        if (cond[event_idx] == 0) {
-            cond_check_res = false;
-            return;
-        }
-        // 命题为真
-        if (cond[event_idx] == 1) {
-            n_match++;
+    for(int idx:cur_events_idx){
+        // 跳过不在LTL里的事件
+        if(idx != -1){
+            // 其实cond的每个下标，就是bdd_map里，和LTL有关的ap的每个编号
+            // -1表示不关心
+            if (cond[idx] == -1) {
+                continue;
+            }
+            cout<<"cond_check: ("<<bdd_map_rev[idx]<<":"<<(int)cond[idx]<<")"<<"\n";
+            // 命题为假,直接跳出
+            if (cond[idx] == 0) {
+                cond_check_res = false;
+                cout<<'\n';
+                return;
+            }
+            // 命题为真
+            if (cond[idx] == 1) {
+                n_match++;
+            }
         }
     }
+    cout<<'\n';
     assert(n_match <= n_true);
-    // 只有一个命题能为真
     cond_check_res = n_match == n_true;
 }
 
-bool check_accept(const twa_graph_ptr &aut,const vector<string>& events){
+bool check_accept(const twa_graph_ptr &aut,const vector<unordered_set<string>>& all_events){
+    cout<<"============================= Check"<<'\n';
     unsigned cur_state_id = aut->get_init_state_number();
-    for(const string& e:events){
-        // 其实这里只会跳过没在LTL里的输入
-        if(bdd_map_.find(e) == bdd_map_.end()){
-            continue;
+    // 用来判断是否可以提前结束
+    // 即如果到达出边的trans为1时，可以提前结束
+    bool reach_end = false;
+    for(const unordered_set<string>& cur_events:all_events){
+        cur_events_idx.clear();
+        // 不在LTL里的一律为-1
+        for(string e:cur_events){
+            if(bdd_map.find(e)==bdd_map.end()){
+                cur_events_idx.insert(-1);
+            }else{
+                cur_events_idx.insert(bdd_map[e]);
+            }
         }
-        event_idx = bdd_map_[e];
-        cout<<"cur_state_id: "<<cur_state_id<<" , cur_event: "<<e<<"\n";
+        cout<<"cur_state_id: "<<cur_state_id<<" , cur_event: [";
+        for(auto e:cur_events){
+            cout<<e<<",";
+        } 
+        cout<<"]\n";
         bool sat = false;
         // 遍历当前状态所有的出边
         for (auto& edge: aut->out(cur_state_id)){
-            // cout<<edge.src << " " << edge.dst<<" " << spot::bdd_format_formula(aut->get_dict(), edge.cond)<<"\n";
+            cout<<edge.src << "->" << edge.dst<<" trans:" << spot::bdd_format_formula(aut->get_dict(), edge.cond)<<"\n";
             // bdd_allsat的文档参考：https://buddy.sourceforge.net/manual/group__operator_gf41487d86f76d3480d379ff434a2c476.html#gf41487d86f76d3480d379ff434a2c476
+            // 似乎内部会多次调用回调函数，具体看例子 LTL="i1 & X(o2 & !o3)"; inputs = {{"i1"},{"o2","o3"},{"i2"}};
             bdd_allsat(edge.cond,true_cond_checker);
             // 转移条件是true
             if(cond_check_res){
                 cur_state_id = edge.dst;
                 sat = true;
+                // 提前结束
+                if(edge.src==edge.dst){
+                    reach_end = true;
+                }
                 break;
             }
             bdd_allsat(edge.cond, cond_checker);
@@ -218,15 +217,11 @@ bool check_accept(const twa_graph_ptr &aut,const vector<string>& events){
                 break;
             }
         }
-        if(!sat){
+        if(!sat || reach_end){
             break;
         }
-        // 这个貌似有问题，不能用前缀处理
-        // bool accepting = aut->state_is_accepting(cur_state_id);
-        // if(accepting){
-        //     return true;
-        // }
     }
+    cout<<"final_state_id: "<<cur_state_id<<'\n';
     bool accepting = aut->state_is_accepting(cur_state_id);
     return accepting;
 }
@@ -234,17 +229,17 @@ bool check_accept(const twa_graph_ptr &aut,const vector<string>& events){
 int main()
 {
     /* string formula = "i1 -> o2";   */
-    // 因为是单个单个，所以不支持同时两个ap的判断
-    // !i1 || o2，即要不i1不发生，要不i1和o2都发生
-    // 上面这种还是改成下面这种比较好
-    string formula = "!i1 || (i1 & X(o2))";
-    string formula1 = "i1 & F(o2)";
-    string formula2 = "i1 & X(o2)";
-    string formula3 = "F(i1 & X(o2))";
-    // 程序的输入输出的trace序列
-    vector<string> inputs = {"i3","o4","i1","o2"};
-    twa_graph_ptr aut = formula2aut(formula3);
-    init(aut,inputs);
+    // 输入只能是 ixx或oxx，不能有!ixx/!oxx这种。可以将o3认为是!o2
+    // string formula = "!i1 || (i1 & X(o2))";
+    // string formula1 = "i1 & F(o2)";
+    // string formula2 = "i1 & X(o2)";
+    // string formula3 = "F(i1 & X(o2))";
+    string formula4 = "i1 & X(o2 & !o3)";
+    string formula5 = "F(i1 & X(o2 & !o3))";
+    // 程序的输入输出的trace序列。偶数是输入，奇数是输出
+    vector<unordered_set<string>> inputs = {{"i1"},{"o2","o3"},{"i1"},{"o2","o4"},{"i1"},{"o2","o3"}};
+    twa_graph_ptr aut = formula2aut(formula5);
+    init(aut);
     print_aut(aut);
     bool res = check_accept(aut,inputs);
     string s = res?"true":"false";
