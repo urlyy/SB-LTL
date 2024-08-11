@@ -23,7 +23,7 @@
 
   # 参考下面这个issue的下载方式
   # https://gitlab.lre.epita.fr/spot/spot/-/issues/544
-  echo 'deb [trusted=true] https://download.opensuse.org/repositories/home:/adl/xUbuntu_22.04/ ./' >/etc/apt/sources.list
+  echo 'deb [trusted=true] https://download.opensuse.org/repositories/home:/adl/xUbuntu_22.04/ ./' >> /etc/apt/sources.list
   apt update
   apt upgrade
   apt install spot libspot-dev
