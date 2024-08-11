@@ -11,6 +11,8 @@
 
 ## Install
 
+环境：Ubuntu22.04
+
 - 只有 spot 和 g++两个依赖
 - spot 的安装不能参考教程，如下
 
